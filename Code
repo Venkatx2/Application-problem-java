@@ -1,0 +1,404 @@
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.Scanner;
+
+public class VaccinationSystem {
+
+    static final String URL = "jdbc:mysql://localhost:3306/vaccination_db";
+    static final String USERNAME = "vaccination_user";
+    static final String PASSWORD = "Vaccine@123";
+
+    public static void main(String[] args) {
+
+        Scanner sc = new Scanner(System.in);
+
+        while (true) {
+
+            System.out.println("\n======================================");
+            System.out.println("   VACCINATION APPOINTMENT SYSTEM");
+            System.out.println("======================================");
+            System.out.println("1. Book Appointment");
+            System.out.println("2. Record Completed Dose");
+            System.out.println("3. Search Citizen History");
+            System.out.println("4. Daily Slot Availability Report");
+            System.out.println("5. Cancel Appointment");
+            System.out.println("6. Exit");
+            System.out.println("======================================");
+
+            System.out.print("Enter your choice: ");
+            int choice = sc.nextInt();
+            sc.nextLine();
+
+            switch (choice) {
+
+                case 1:
+                    bookAppointment(sc);
+                    break;
+
+                case 2:
+                    recordCompletedDose(sc);
+                    break;
+
+                case 3:
+                    searchCitizenHistory(sc);
+                    break;
+
+                case 4:
+                    dailySlotReport(sc);
+                    break;
+
+                case 5:
+                    cancelAppointment(sc);
+                    break;
+
+                case 6:
+                    System.out.println("Thank you for using the system!");
+                    sc.close();
+                    return;
+
+                default:
+                    System.out.println("Invalid choice.");
+            }
+        }
+    }
+
+    // 1. Book Appointment
+    static void bookAppointment(Scanner sc) {
+
+        System.out.print("Enter Slot ID: ");
+        int slotId = sc.nextInt();
+        sc.nextLine();
+
+        System.out.print("Enter Citizen Name: ");
+        String citizenName = sc.nextLine();
+
+        System.out.print("Enter Dose Number: ");
+        int doseNumber = sc.nextInt();
+
+        String checkSql =
+                "SELECT capacity, booked_count FROM slots " +
+                "WHERE slot_id = ? FOR UPDATE";
+
+        String updateSql =
+                "UPDATE slots SET booked_count = booked_count + 1 " +
+                "WHERE slot_id = ? AND booked_count < capacity";
+
+        String insertSql =
+                "INSERT INTO appointments " +
+                "(slot_id, citizen_name, dose_number, completed) " +
+                "VALUES (?, ?, ?, ?)";
+
+        try (Connection con =
+                     DriverManager.getConnection(URL, USERNAME, PASSWORD)) {
+
+            con.setAutoCommit(false);
+
+            try {
+
+                // Check slot
+                try (PreparedStatement checkStmt =
+                             con.prepareStatement(checkSql)) {
+
+                    checkStmt.setInt(1, slotId);
+
+                    try (ResultSet rs = checkStmt.executeQuery()) {
+
+                        if (!rs.next()) {
+                            System.out.println("Slot not found.");
+                            con.rollback();
+                            return;
+                        }
+
+                        int capacity = rs.getInt("capacity");
+                        int bookedCount = rs.getInt("booked_count");
+
+                        if (bookedCount >= capacity) {
+                            System.out.println("Booking rejected! Slot is full.");
+                            con.rollback();
+                            return;
+                        }
+                    }
+                }
+
+                // Update booked count
+                try (PreparedStatement updateStmt =
+                             con.prepareStatement(updateSql)) {
+
+                    updateStmt.setInt(1, slotId);
+
+                    int rowsUpdated = updateStmt.executeUpdate();
+
+                    if (rowsUpdated == 0) {
+                        con.rollback();
+                        System.out.println("Booking rejected! Slot is full.");
+                        return;
+                    }
+                }
+
+                // Insert appointment
+                try (PreparedStatement insertStmt =
+                             con.prepareStatement(insertSql)) {
+
+                    insertStmt.setInt(1, slotId);
+                    insertStmt.setString(2, citizenName);
+                    insertStmt.setInt(3, doseNumber);
+                    insertStmt.setBoolean(4, false);
+
+                    insertStmt.executeUpdate();
+                }
+
+                con.commit();
+
+                System.out.println("Appointment booked successfully!");
+
+            } catch (Exception e) {
+
+                con.rollback();
+
+                System.out.println(
+                        "Booking failed. Transaction rolled back.");
+                System.out.println(e.getMessage());
+            }
+
+        } catch (Exception e) {
+
+            System.out.println("Database error!");
+            System.out.println(e.getMessage());
+        }
+    }
+
+    // 2. Record Completed Dose
+    static void recordCompletedDose(Scanner sc) {
+
+        System.out.print("Enter Appointment ID: ");
+        int appointmentId = sc.nextInt();
+
+        String sql =
+                "UPDATE appointments SET completed = ? " +
+                "WHERE appointment_id = ?";
+
+        try (Connection con =
+                     DriverManager.getConnection(URL, USERNAME, PASSWORD);
+             PreparedStatement stmt = con.prepareStatement(sql)) {
+
+            stmt.setBoolean(1, true);
+            stmt.setInt(2, appointmentId);
+
+            int rowsUpdated = stmt.executeUpdate();
+
+            if (rowsUpdated > 0) {
+                System.out.println(
+                        "Dose marked as completed successfully!");
+            } else {
+                System.out.println("Appointment not found.");
+            }
+
+        } catch (Exception e) {
+
+            System.out.println("Error: " + e.getMessage());
+        }
+    }
+
+    // 3. Search Citizen History
+    static void searchCitizenHistory(Scanner sc) {
+
+        System.out.print("Enter Citizen Name: ");
+        String citizenName = sc.nextLine();
+
+        String sql =
+                "SELECT appointment_id, slot_id, dose_number, completed " +
+                "FROM appointments WHERE citizen_name = ?";
+
+        try (Connection con =
+                     DriverManager.getConnection(URL, USERNAME, PASSWORD);
+             PreparedStatement stmt = con.prepareStatement(sql)) {
+
+            stmt.setString(1, citizenName);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+
+                boolean found = false;
+
+                System.out.println("\nVaccination History for: "
+                        + citizenName);
+                System.out.println("--------------------------------");
+
+                while (rs.next()) {
+
+                    found = true;
+
+                    System.out.println(
+                            "Appointment ID: "
+                                    + rs.getInt("appointment_id"));
+
+                    System.out.println(
+                            "Slot ID: "
+                                    + rs.getInt("slot_id"));
+
+                    System.out.println(
+                            "Dose Number: "
+                                    + rs.getInt("dose_number"));
+
+                    System.out.println(
+                            "Completed: "
+                                    + rs.getBoolean("completed"));
+
+                    System.out.println("--------------------------------");
+                }
+
+                if (!found) {
+                    System.out.println(
+                            "No vaccination history found.");
+                }
+            }
+
+        } catch (Exception e) {
+
+            System.out.println("Error: " + e.getMessage());
+        }
+    }
+
+    // 4. Daily Slot Availability Report
+    static void dailySlotReport(Scanner sc) {
+
+        System.out.print("Enter Date (YYYY-MM-DD): ");
+        String date = sc.nextLine();
+
+        String sql =
+                "SELECT slot_id, time, capacity, booked_count " +
+                "FROM slots WHERE date = ? ORDER BY time";
+
+        try (Connection con =
+                     DriverManager.getConnection(URL, USERNAME, PASSWORD);
+             PreparedStatement stmt = con.prepareStatement(sql)) {
+
+            stmt.setString(1, date);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+
+                System.out.println("\nDAILY SLOT AVAILABILITY REPORT");
+                System.out.println(
+                        "------------------------------------------------");
+                System.out.printf(
+                        "%-8s %-12s %-10s %-10s%n",
+                        "Slot ID", "Time", "Capacity", "Available");
+                System.out.println(
+                        "------------------------------------------------");
+
+                boolean found = false;
+
+                while (rs.next()) {
+
+                    found = true;
+
+                    int slotId = rs.getInt("slot_id");
+                    String time = rs.getString("time");
+                    int capacity = rs.getInt("capacity");
+                    int booked = rs.getInt("booked_count");
+
+                    int available = capacity - booked;
+
+                    System.out.printf(
+                            "%-8d %-12s %-10d %-10d%n",
+                            slotId,
+                            time,
+                            capacity,
+                            available);
+                }
+
+                if (!found) {
+                    System.out.println(
+                            "No slots available for this date.");
+                }
+            }
+
+        } catch (Exception e) {
+
+            System.out.println("Error: " + e.getMessage());
+        }
+    }
+
+    // 5. Cancel Appointment
+    static void cancelAppointment(Scanner sc) {
+
+        System.out.print("Enter Appointment ID to cancel: ");
+        int appointmentId = sc.nextInt();
+
+        String findSql =
+                "SELECT slot_id FROM appointments " +
+                "WHERE appointment_id = ? FOR UPDATE";
+
+        String deleteSql =
+                "DELETE FROM appointments " +
+                "WHERE appointment_id = ?";
+
+        String updateSql =
+                "UPDATE slots SET booked_count = booked_count - 1 " +
+                "WHERE slot_id = ? AND booked_count > 0";
+
+        try (Connection con =
+                     DriverManager.getConnection(URL, USERNAME, PASSWORD)) {
+
+            con.setAutoCommit(false);
+
+            try {
+
+                int slotId;
+
+                // Find appointment
+                try (PreparedStatement findStmt =
+                             con.prepareStatement(findSql)) {
+
+                    findStmt.setInt(1, appointmentId);
+
+                    try (ResultSet rs = findStmt.executeQuery()) {
+
+                        if (!rs.next()) {
+                            System.out.println("Appointment not found.");
+                            con.rollback();
+                            return;
+                        }
+
+                        slotId = rs.getInt("slot_id");
+                    }
+                }
+
+                // Delete appointment
+                try (PreparedStatement deleteStmt =
+                             con.prepareStatement(deleteSql)) {
+
+                    deleteStmt.setInt(1, appointmentId);
+                    deleteStmt.executeUpdate();
+                }
+
+                // Decrease booked count
+                try (PreparedStatement updateStmt =
+                             con.prepareStatement(updateSql)) {
+
+                    updateStmt.setInt(1, slotId);
+                    updateStmt.executeUpdate();
+                }
+
+                con.commit();
+
+                System.out.println(
+                        "Appointment cancelled successfully!");
+
+            } catch (Exception e) {
+
+                con.rollback();
+
+                System.out.println(
+                        "Cancellation failed. Transaction rolled back.");
+                System.out.println(e.getMessage());
+            }
+
+        } catch (Exception e) {
+
+            System.out.println("Database error!");
+            System.out.println(e.getMessage());
+        }
+    }
+}
